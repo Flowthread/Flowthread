@@ -1,0 +1,139 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User account information and role.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "displayName": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "photoURL": { "type": "string" },
+        "role": { "type": "string", "enum": ["freelancer", "client"] },
+        "stripeAccountId": { "type": "string" },
+        "skills": { "type": "array", "items": { "type": "string" } },
+        "location": { "type": "string" },
+        "bio": { "type": "string" },
+        "portfolioUrl": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "displayName", "email", "role", "createdAt"]
+    },
+    "Thread": {
+      "title": "Thread",
+      "description": "A conversation thread between a client and a freelancer.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "participants": { "type": "array", "items": { "type": "string" } },
+        "clientId": { "type": "string" },
+        "freelancerId": { "type": "string" },
+        "lastMessage": { "type": "string" },
+        "workPostId": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "participants", "clientId", "freelancerId", "updatedAt"]
+    },
+    "Message": {
+      "title": "Message",
+      "description": "A single message within a thread.",
+      "type": "object",
+      "properties": {
+        "text": { "type": "string" },
+        "senderId": { "type": "string" },
+        "senderName": { "type": "string" },
+        "senderPhoto": { "type": "string" },
+        "seenBy": { "type": "array", "items": { "type": "string" } },
+        "edited": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["text", "senderId", "senderName", "createdAt"]
+    },
+    "Task": {
+      "title": "Task",
+      "description": "A specific task or milestone within a thread.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "price": { "type": "number" },
+        "deadline": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "paid", "delivered"] },
+        "clientId": { "type": "string" },
+        "freelancerId": { "type": "string" },
+        "threadId": { "type": "string" },
+        "creatorId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "description", "price", "status", "threadId", "creatorId", "clientId", "freelancerId", "createdAt"]
+    },
+    "WorkPost": {
+      "title": "WorkPost",
+      "description": "A public job posting by a client.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "budget": { "type": "number" },
+        "category": { "type": "string" },
+        "clientId": { "type": "string" },
+        "clientName": { "type": "string" },
+        "status": { "type": "string", "enum": ["open", "closed"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "description", "budget", "clientId", "clientName", "status", "createdAt"]
+    },
+    "Transaction": {
+      "title": "Transaction",
+      "description": "A record of a payment between a client and a freelancer.",
+      "type": "object",
+      "properties": {
+        "taskId": { "type": "string" },
+        "amount": { "type": "number" },
+        "fromId": { "type": "string" },
+        "toId": { "type": "string" },
+        "status": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["taskId", "amount", "status", "fromId", "toId", "createdAt"]
+    },
+    "Invite": {
+      "title": "Invite",
+      "description": "A record of an invitation sent to a new user.",
+      "type": "object",
+      "properties": {
+        "inviterId": { "type": "string", "description": "The UID of the user who sent the invite." },
+        "inviteeEmail": { "type": "string", "format": "email", "description": "The email of the invited user (optional)." },
+        "role": { "type": "string", "enum": ["client", "freelancer"], "description": "The suggested role for the invitee." },
+        "status": { "type": "string", "enum": ["pending", "accepted"], "description": "The status of the invitation." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "When the invite was generated." }
+      },
+      "required": ["inviterId", "role", "status", "createdAt"]
+    },
+    "Notification": {
+      "title": "Notification",
+      "description": "An in-app notification for the user.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "message": { "type": "string" },
+        "type": { "type": "string", "enum": ["message", "task_status", "task_created", "payment", "delivery"] },
+        "link": { "type": "string" },
+        "read": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "title", "message", "type", "link", "read", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{uid}": { "schema": "UserProfile", "description": "User profiles" },
+    "/users/{uid}/notifications/{notificationId}": { "schema": "Notification", "description": "User notifications" },
+    "/threads/{threadId}": { "schema": "Thread", "description": "Project threads" },
+    "/threads/{threadId}/messages/{messageId}": { "schema": "Message", "description": "Thread messages" },
+    "/threads/{threadId}/tasks/{taskId}": { "schema": "Task", "description": "Thread tasks" },
+    "/workPosts/{postId}": { "schema": "WorkPost", "description": "Public work posts" },
+    "/transactions/{transactionId}": { "schema": "Transaction", "description": "Payment records" },
+    "/invites/{inviteId}": { "schema": "Invite", "description": "User invitation records" }
+  }
+}

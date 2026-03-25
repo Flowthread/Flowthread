@@ -1,0 +1,332 @@
+// ===============================================================
+// Assumed Data Model
+// ===============================================================
+//
+// Collection: users
+// Document ID: {uid}
+// Fields:
+//   - uid: string (required) - The user's unique ID
+//   - displayName: string (required, 1-100 chars) - The user's name
+//   - email: string (required, email format) - The user's email (PII)
+//   - photoURL: string (optional, URL format) - Profile photo
+//   - role: string (required, 'client'|'freelancer') - User role
+//   - bio: string (optional, 0-1000 chars) - User bio
+//   - location: string (optional, 0-200 chars) - User location
+//   - portfolioUrl: string (optional, URL format) - Portfolio link
+//   - skills: list (optional, max 10) - Freelancer skills
+//   - stripeAccountId: string (optional) - Stripe ID (PII)
+//   - createdAt: timestamp (required, immutable) - Creation time
+//   - darkMode: bool (optional) - Dark mode preference
+//   - pushNotifications: bool (optional) - Push notifications preference
+//   - emailNotifications: bool (optional) - Email notifications preference
+//
+// Collection: threads
+// Document ID: auto-generated
+// Fields:
+//   - title: string (required, 1-200 chars) - Project title
+//   - participants: list (required, size 2) - UIDs of participants
+//   - clientId: string (required) - UID of the client
+//   - freelancerId: string (required) - UID of the freelancer
+//   - lastMessage: string (optional, 0-1000 chars) - Last message snippet
+//   - updatedAt: timestamp (required) - Last update time
+//
+// Collection: threads/{threadId}/messages
+// Document ID: auto-generated
+// Fields:
+//   - text: string (required, 1-5000 chars) - Message content
+//   - senderId: string (required) - UID of the sender
+//   - senderName: string (required, 1-100 chars) - Name of the sender
+//   - senderPhoto: string (optional, URL format) - Photo of the sender
+//   - createdAt: timestamp (required, immutable) - Creation time
+//   - seenBy: list (optional) - UIDs of users who saw the message
+//   - edited: bool (optional) - Whether the message was edited
+//
+// Collection: threads/{threadId}/tasks
+// Document ID: auto-generated
+// Fields:
+//   - title: string (required, 1-200 chars) - Task title
+//   - description: string (required, 1-2000 chars) - Task details
+//   - price: number (required, positive) - Price in cents
+//   - deadline: timestamp (required) - Task deadline
+//   - status: string (required, 'pending'|'paid'|'delivered') - Task status
+//   - clientId: string (required) - Must match thread clientId
+//   - freelancerId: string (required) - Must match thread freelancerId
+//   - threadId: string (required) - Parent thread ID
+//   - creatorId: string (required) - UID of the creator
+//   - createdAt: timestamp (required, immutable) - Creation time
+//   - deliveryUrl: string (optional, URL format) - Link to work
+//
+// Collection: workPosts
+// Document ID: auto-generated
+// Fields:
+//   - title: string (required, 1-200 chars) - Job title
+//   - description: string (required, 1-5000 chars) - Job details
+//   - budget: number (required, positive) - Budget in cents
+//   - category: string (optional) - Job category
+//   - clientId: string (required) - UID of the poster
+//   - clientName: string (required) - Name of the poster
+//   - status: string (required, 'open'|'closed') - Post status
+//   - createdAt: timestamp (required, immutable) - Creation time
+//
+// Collection: feedback
+// Document ID: auto-generated
+// Fields:
+//   - userId: string (required) - UID of the user
+//   - title: string (optional, 0-200 chars) - Feedback title
+//   - description: string (required, 1-5000 chars) - Feedback details
+//   - rating: number (required, 1-5) - User rating
+//   - createdAt: timestamp (required, immutable) - Creation time
+//   - status: string (required, 'unread'|'read') - Feedback status
+//
+// ===============================================================
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+        ( (request.auth.token.email == "mahjabeenismail5@gmail.com" && request.auth.token.email_verified == true) ||
+          (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin') );
+    }
+
+    function getThread(threadId) {
+      return get(/databases/$(database)/documents/threads/$(threadId)).data;
+    }
+
+    function isThreadParticipant(data) {
+      return isAuthenticated() && request.auth.uid in data.get('participants', []);
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    function isValidUrl(url) {
+      return url is string && (url.matches("^https://.*") || url.matches("^http://.*"));
+    }
+
+    function isValidDateString(dateStr) {
+      return dateStr is string && dateStr.matches("^\\d{4}-\\d{2}-\\d{2}.*");
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'displayName', 'email', 'role', 'createdAt']) &&
+             data.uid == request.auth.uid &&
+             data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 100 &&
+             isValidEmail(data.email) &&
+             (!('photoURL' in data) || data.photoURL == null || data.photoURL == "" || isValidUrl(data.photoURL)) &&
+             data.role in ['client', 'freelancer'] &&
+             data.createdAt is timestamp &&
+             (!('bio' in data) || (data.bio is string && data.bio.size() <= 1000)) &&
+             (!('location' in data) || (data.location is string && data.location.size() <= 200)) &&
+             (!('portfolioUrl' in data) || data.portfolioUrl == null || data.portfolioUrl == "" || isValidUrl(data.portfolioUrl)) &&
+             (!('skills' in data) || (data.skills is list && data.skills.size() <= 10)) &&
+             (!('darkMode' in data) || data.darkMode is bool) &&
+             (!('pushNotifications' in data) || data.pushNotifications is bool) &&
+             (!('emailNotifications' in data) || data.emailNotifications is bool);
+    }
+
+    function isValidThread(data) {
+      return data.keys().hasAll(['title', 'participants', 'clientId', 'freelancerId', 'updatedAt']) &&
+             data.title is string && data.title.size() >= 1 && data.title.size() <= 200 &&
+             data.participants is list && data.participants.size() == 2 &&
+             data.participants[0] is string && data.participants[0].size() <= 128 &&
+             data.participants[1] is string && data.participants[1].size() <= 128 &&
+             data.clientId is string && data.clientId.size() <= 128 &&
+             data.freelancerId is string && data.freelancerId.size() <= 128 &&
+             data.clientId in data.participants && data.freelancerId in data.participants &&
+             (!('lastMessage' in data) || data.lastMessage == null || (data.lastMessage is string && data.lastMessage.size() <= 1000)) &&
+             (!('workPostId' in data) || data.workPostId == null || (data.workPostId is string && data.workPostId.size() <= 128)) &&
+             data.updatedAt is timestamp;
+    }
+
+    function isValidInvite(data) {
+      return data.keys().hasAll(['inviterId', 'role', 'status', 'createdAt']) &&
+             data.inviterId == request.auth.uid &&
+             data.role in ['client', 'freelancer'] &&
+             data.status in ['pending', 'accepted'] &&
+             data.createdAt is timestamp &&
+             (!('inviteeEmail' in data) || data.inviteeEmail == null || isValidEmail(data.inviteeEmail));
+    }
+
+    function isValidMessage(data) {
+      return data.keys().hasAll(['text', 'senderId', 'senderName', 'createdAt']) &&
+             data.text is string && data.text.size() >= 1 && data.text.size() <= 5000 &&
+             data.senderName is string && data.senderName.size() >= 1 && data.senderName.size() <= 100 &&
+             (!('senderPhoto' in data) || data.senderPhoto == null || data.senderPhoto == "" || isValidUrl(data.senderPhoto)) &&
+             data.createdAt is timestamp &&
+             (!('seenBy' in data) || data.seenBy is list) &&
+             (!('edited' in data) || data.edited is bool);
+    }
+
+    function isValidTask(data) {
+      return data.keys().hasAll(['title', 'description', 'price', 'deadline', 'status', 'clientId', 'freelancerId', 'threadId', 'creatorId', 'createdAt']) &&
+             data.title is string && data.title.size() >= 1 && data.title.size() <= 200 &&
+             data.description is string && data.description.size() >= 1 && data.description.size() <= 2000 &&
+             data.price is number && data.price > 0 &&
+             data.deadline is timestamp &&
+             data.status in ['pending', 'paid', 'delivered'] &&
+             data.clientId is string && data.freelancerId is string &&
+             data.threadId is string && data.creatorId == request.auth.uid &&
+             data.createdAt is timestamp &&
+             (!('deliveryUrl' in data) || data.deliveryUrl == null || data.deliveryUrl == "" || isValidUrl(data.deliveryUrl));
+    }
+
+    function isValidWorkPost(data) {
+      return data.keys().hasAll(['title', 'description', 'budget', 'clientId', 'clientName', 'status', 'createdAt']) &&
+             data.title is string && data.title.size() >= 1 && data.title.size() <= 200 &&
+             data.description is string && data.description.size() >= 1 && data.description.size() <= 5000 &&
+             data.budget is number && data.budget > 0 &&
+             data.clientId == request.auth.uid &&
+             data.clientName is string && data.clientName.size() >= 1 && data.clientName.size() <= 100 &&
+             data.status in ['open', 'closed'] &&
+             data.createdAt is timestamp &&
+             (!('category' in data) || (data.category is string && data.category.size() <= 100));
+    }
+
+    function isValidNotification(data) {
+      return data.keys().hasAll(['title', 'message', 'link', 'read', 'createdAt']) &&
+             data.title is string && data.title.size() >= 1 && data.title.size() <= 100 &&
+             data.message is string && data.message.size() >= 1 && data.message.size() <= 500 &&
+             data.link is string && data.link.size() >= 1 && data.link.size() <= 200 &&
+             data.read is bool &&
+             data.createdAt is timestamp;
+    }
+
+    function isValidFeedback(data) {
+      return data.keys().hasAll(['userId', 'description', 'rating', 'createdAt', 'status']) &&
+             data.userId == request.auth.uid &&
+             data.description is string && data.description.size() >= 1 && data.description.size() <= 5000 &&
+             data.rating is number && data.rating >= 1 && data.rating <= 5 &&
+             data.createdAt is timestamp &&
+             data.status == 'unread' &&
+             (!('title' in data) || (data.title is string && data.title.size() <= 200));
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    // Default deny
+    match /{path=**} {
+      allow read, write: if false;
+    }
+
+    match /users/{userId} {
+      // Allow authenticated users to read any profile (for participant info)
+      allow read: if isAuthenticated();
+      allow create: if isOwner(userId) && isValidUser(request.resource.data);
+      allow update: if isOwner(userId) && isValidUser(request.resource.data) 
+                    && request.resource.data.createdAt == resource.data.createdAt;
+      allow delete: if isOwner(userId);
+
+      match /notifications/{notificationId} {
+        allow read: if isOwner(userId);
+        allow create: if isAuthenticated() && isValidNotification(request.resource.data);
+        allow update: if isOwner(userId) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read']);
+        allow delete: if isOwner(userId);
+      }
+    }
+
+    match /threads/{threadId} {
+      allow read: if isAuthenticated() && (request.auth.uid in resource.data.participants || isAdmin());
+      allow create: if isAuthenticated() 
+                    && request.auth.uid in request.resource.data.participants
+                    && request.resource.data.clientId != null
+                    && request.resource.data.freelancerId != null
+                    && isValidThread(request.resource.data);
+      allow update: if isAuthenticated() 
+                    && (request.auth.uid in resource.data.participants || isAdmin())
+                    && isValidThread(request.resource.data);
+      
+      match /messages/{messageId} {
+        allow read: if isAuthenticated() && (request.auth.uid in get(/databases/$(database)/documents/threads/$(threadId)).data.participants || isAdmin());
+        allow create: if isAuthenticated() 
+                      && request.auth.uid in get(/databases/$(database)/documents/threads/$(threadId)).data.participants
+                      && isValidMessage(request.resource.data)
+                      && request.resource.data.senderId == request.auth.uid;
+        allow update: if isAuthenticated() 
+                      && request.auth.uid in get(/databases/$(database)/documents/threads/$(threadId)).data.participants
+                      && isValidMessage(request.resource.data)
+                      && (
+                        // Sender can edit their own message
+                        (resource.data.senderId == request.auth.uid && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['text', 'edited'])) ||
+                        // Any participant can update seenBy
+                        (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['seenBy']))
+                      );
+        allow delete: if isAuthenticated() && resource.data.senderId == request.auth.uid;
+      }
+      
+      match /tasks/{taskId} {
+        allow read: if isAuthenticated() && (request.auth.uid in get(/databases/$(database)/documents/threads/$(threadId)).data.participants || isAdmin());
+        allow create: if isAuthenticated() 
+                      && request.auth.uid in get(/databases/$(database)/documents/threads/$(threadId)).data.participants
+                      && request.resource.data.clientId == get(/databases/$(database)/documents/threads/$(threadId)).data.clientId
+                      && request.resource.data.freelancerId == get(/databases/$(database)/documents/threads/$(threadId)).data.freelancerId
+                      && isValidTask(request.resource.data);
+        allow update: if isAuthenticated() 
+                      && (request.auth.uid in get(/databases/$(database)/documents/threads/$(threadId)).data.participants || isAdmin())
+                      && isValidTask(request.resource.data)
+                      && request.resource.data.createdAt == resource.data.createdAt;
+      }
+    }
+
+    // Support for collectionGroup(db, "tasks") in Timeline
+    // Note: Queries must be filtered by clientId or freelancerId to be secure and performant
+    match /{path=**}/tasks/{taskId} {
+      allow read: if isAuthenticated() && (
+        resource.data.clientId == request.auth.uid || 
+        resource.data.freelancerId == request.auth.uid || 
+        isAdmin()
+      );
+    }
+
+    match /workPosts/{postId} {
+      allow read: if true;
+      allow create: if isAuthenticated() && isValidWorkPost(request.resource.data);
+      allow update: if isAuthenticated() && resource.data.clientId == request.auth.uid 
+                    && isValidWorkPost(request.resource.data)
+                    && request.resource.data.createdAt == resource.data.createdAt;
+      allow delete: if isAuthenticated() && resource.data.clientId == request.auth.uid;
+    }
+
+    match /transactions/{transactionId} {
+      allow read: if isAuthenticated() && (request.auth.uid == resource.data.fromId || request.auth.uid == resource.data.toId || isAdmin());
+      allow create, update, delete: if false;
+    }
+
+    match /invites/{inviteId} {
+      allow read: if isAuthenticated() && (resource.data.inviterId == request.auth.uid || resource.data.inviteeEmail == request.auth.token.email);
+      allow create: if isAuthenticated() && request.resource.data.inviterId == request.auth.uid && isValidInvite(request.resource.data);
+      allow update: if isAuthenticated() && (resource.data.inviterId == request.auth.uid || resource.data.inviteeEmail == request.auth.token.email) && isValidInvite(request.resource.data);
+      allow delete: if isAuthenticated() && resource.data.inviterId == request.auth.uid;
+    }
+
+    match /feedback/{feedbackId} {
+      allow create: if isAuthenticated() && isValidFeedback(request.resource.data);
+      allow read, update, delete: if isAdmin();
+    }
+  }
+}
